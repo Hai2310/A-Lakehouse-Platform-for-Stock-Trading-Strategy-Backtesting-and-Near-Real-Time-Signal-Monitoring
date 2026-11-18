@@ -48,3 +48,22 @@ def reference_frame(root: Path, table: str) -> pd.DataFrame:
     frame["observed_at_utc"] = observed
     frame["evidence_date"] = observed.dt.tz_convert("Asia/Ho_Chi_Minh").dt.tz_localize(None).dt.normalize()
     return frame
+
+
+class Identity:
+    def __init__(self, catalog: pd.DataFrame, definitions: pd.DataFrame, calendar: pd.DataFrame) -> None:
+        authoritative = catalog.loc[catalog.source.eq("dnse") & catalog.exchange.notna()]
+        # Current listing takes precedence over old snapshots for the venue hint.
+        distinct = authoritative[["symbol", "exchange"]].drop_duplicates()
+        self.venues = distinct.loc[~distinct.symbol.duplicated(keep=False)].set_index("symbol").exchange
+        fields = ["symbol", "exchange", "isin", "evidence_date", "observed_at_utc", "source", "bronze_file"]
+        notices = calendar.assign(exchange=venue(calendar.market), observed_at_utc=utc(calendar.ingested_at),
+                                  evidence_date=pd.to_datetime(calendar.record_date))
+        evidence = pd.concat([frame.reindex(columns=fields) for frame in (definitions, notices, catalog)], ignore_index=True)
+        evidence["isin"] = evidence["isin"].astype("string").str.upper().str.strip()
+        evidence.loc[~evidence["isin"].str.fullmatch(r"VN[A-Z0-9]{10}", na=False), "isin"] = pd.NA
+        pairs = evidence.dropna(subset=["symbol", "exchange", "isin"])[["symbol", "exchange", "isin"]].drop_duplicates()
+        ambiguous = pairs.duplicated(["symbol", "exchange"], keep=False)
+        self.by_pair = pairs.loc[~ambiguous].set_index(["symbol", "exchange"])["isin"]
+        self.ambiguous = pairs.loc[ambiguous].set_index(["symbol", "exchange"]).index
+        self.evidence = self.attach(evidence.dropna(subset=["symbol"]))
