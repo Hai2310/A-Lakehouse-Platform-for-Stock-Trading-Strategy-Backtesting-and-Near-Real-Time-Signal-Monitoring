@@ -54,3 +54,25 @@ Khóa chung là `security_id, fiscal_period_end, period_type, statement_scope, s
 | `trading_calendar` | `exchange, trading_date, session_segment, calendar_version` | Lịch theo sàn, đoạn phiên sáng/chiều/đấu giá, giờ bắt đầu/kết thúc và ngoại lệ theo thời kỳ. |
 | `data_coverage` | `instrument_type, instrument_id, interval, source, bar_origin, trading_date, calendar_version` | Số nến kỳ vọng nếu có đủ căn cứ từ lịch và chính sách nguồn, số nến nhận, mốc đầu/cuối, khoảng thiếu và lý do đã xác minh. |
 
+## Quy ước xử lý
+
+1. **Định danh.** Dùng ISIN và lịch sử mã/sàn có bằng chứng để lập `security_id`. Với nguồn chỉ có ticker, ánh xạ theo mã, sàn và ngày giao dịch. Trường hợp nhiều ứng viên hoặc chưa có bằng chứng được ghi nhận để xử lý. Việc lưu ảnh chụp hiện tại chỉ xác nhận định danh tại mốc quan sát đó.
+2. **Thời gian.** Lưu timestamp có múi giờ UTC. `trading_date` là ngày phiên Việt Nam. Giữ riêng thời gian dữ liệu mô tả, thời điểm công bố hoặc khả dụng và thời điểm hệ thống thu thập. Giá trị chưa xác minh để `null`. Backtest chỉ sử dụng bản ghi đủ điều kiện `available_at_utc <= decision_time_utc`.
+3. **Giá và đơn vị.** Giá cổ phiếu dùng VND/cổ phiếu, khối lượng dùng số cổ phiếu và tiền BCTC dùng VND sau khi xác minh hệ số quy đổi. Giữ đơn vị và cơ sở giá của nguồn. Dữ liệu có `price_basis=UNKNOWN` cần được xác minh trước khi điều chỉnh quyền. Nếu có nến tổng hợp từ `1m`, lưu `bar_origin=DERIVED_1M`, lịch phiên và độ phủ. Giữ nến tải trực tiếp với `bar_origin=DIRECT` để đối soát. Khung `1D` tải trực tiếp vẫn có thể phục vụ backtest dài hạn trong phạm vi xác nhận.
+4. **Truy vết và phiên bản.** Lưu `source`, khóa gốc, `bronze_file`, `observed_at_utc`, `silver_run_id`, `schema_version` và trạng thái chất lượng. Ghi đè bản ghi cùng khóa chỉ khi quy tắc chọn bản ghi xác định được. Giữ các phiên bản nghiệp vụ khác nhau của BCTC và VSDC. Báo xung đột OHLCV giữa nguồn để Gold có thể áp dụng chính sách chọn nguồn rõ ràng.
+
+## Data Quality và ghi dữ liệu
+
+```text
+data/bronze/{market,vsdc,bctc}
+    → đọc và chuẩn hóa theo từng lô
+    → ghi Parquet Silver tạm và dòng lỗi
+    → kiểm tra chất lượng và ghi độ phủ
+    → publish các phân vùng đạt yêu cầu cho Gold
+```
+
+- **Chặn phân vùng** khi lô đầu ra thiếu cột bắt buộc, còn khóa trùng, còn OHLCV không hợp lệ sau bước lọc, hoặc ghi Parquet thất bại. Dòng không hợp lệ đi vào `data/quarantine/silver/<domain>/<table>/` kèm mã lỗi và đường dẫn Bronze. Kiểm tra tỷ lệ dòng bị loại theo ngưỡng được chốt cho từng nguồn và khung sau khi chạy mẫu. Giữ đầu ra đã publish trước đó nếu lần mới thất bại.
+- **Báo cảnh báo và giới hạn phạm vi sử dụng** khi thiếu lịch phiên xác thực, lịch sử nguồn ngắn, thành phần rổ chỉ có snapshot hoặc dữ liệu chưa rõ ngày công bố. Độ phủ cần phân biệt trạng thái xác minh được như chưa niêm yết, tạm ngừng, không có giao dịch, lỗi nguồn và chưa xác định. Tránh suy ra thiếu dữ liệu chỉ từ việc một phút không có nến.
+- **Great Expectations** kiểm tra schema, khóa và quy tắc bắt buộc trên đầu ra Silver tạm. **Soda** theo dõi số dòng, độ mới và độ phủ theo phân vùng. Hai công cụ được đặt ở bước kiểm tra trước khi publish. Bản local đầu tiên có thể dùng các kiểm tra pandas hiện có và ghi báo cáo vào `data/reports/silver_quality.csv`.
+- Dữ liệu xuất dưới `data/silver/{market,vsdc,bctc,reference,quality}/<table>/`. Nến trong phiên ưu tiên phân vùng theo `interval` và tháng phiên, nến ngày theo năm, BCTC theo năm tài chính và VSDC theo năm chốt quyền. Đọc lại file tạm trước khi publish. Chạy lại cùng đầu vào phải cho cùng khóa và nội dung nghiệp vụ.
+
