@@ -1,0 +1,1 @@
+"""VSDC corporate-action ingestion."""

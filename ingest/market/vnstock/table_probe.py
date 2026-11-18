@@ -19,6 +19,17 @@ def safe_message(exc: Exception) -> str:
     return message
 
 
+def dnse_instrument(symbol: str, snapshot_at: str) -> pd.DataFrame:
+    import vnstock_oapi as oapi
+
+    rows = []
+    for envelope in oapi.source('dnse').raw('price/{symbol}/secdef', symbol=symbol):
+        if not isinstance(envelope.body, list):
+            raise TypeError('Unexpected DNSE secdef response')
+        rows.extend(envelope.body)
+    return pd.DataFrame(rows).assign(symbol=symbol, snapshot_at=snapshot_at)
+
+
 def run_remaining_tables(symbols: list[str], *, start: str, end: str,
                          indices: tuple[str, ...] = ('VNINDEX', 'VN30', 'HNXINDEX', 'UPCOMINDEX')):
     """Fetch seven tables, retaining frames and per-request errors only in RAM.
@@ -27,7 +38,6 @@ def run_remaining_tables(symbols: list[str], *, start: str, end: str,
     for the table. Current snapshots do not imply point-in-time historical coverage.
     """
     from vnstock import Market, Reference
-    import vnstock_oapi as oapi
 
     tables: dict[str, pd.DataFrame] = {}
     records: list[dict] = []
@@ -97,23 +107,8 @@ def run_remaining_tables(symbols: list[str], *, start: str, end: str,
                     print(f'{table}: {count}/{len(keys)} requests', flush=True)
         return pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()
 
-    def instrument(symbol):
-        envelopes = oapi.source('dnse').raw('price/{symbol}/secdef', symbol=symbol)
-        rows = []
-        for envelope in envelopes:
-            body = envelope.body
-            if isinstance(body, list):
-                rows.extend(body)
-            else:
-                raise TypeError('Unexpected secdef response; inspect source schema.')
-        frame = pd.DataFrame(rows)
-        if not frame.empty:
-            frame['symbol'] = symbol
-            frame['snapshot_at'] = now
-        return frame
-
     # One request per symbol serves both trading metadata and price-limit snapshot.
-    instruments = batch('instrument_snapshot', 'dnse', symbols, instrument)
+    instruments = batch('instrument_snapshot', 'dnse', symbols, lambda symbol: dnse_instrument(symbol, now))
     if configured['fhsc']:
         def profile(symbol):
             frame = Reference('fhsc').company(symbol).info().copy()

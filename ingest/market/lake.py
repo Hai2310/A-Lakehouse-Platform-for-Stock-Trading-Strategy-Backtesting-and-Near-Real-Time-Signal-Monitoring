@@ -53,14 +53,17 @@ def _slug(value: str) -> str:
 
 
 class ParquetLake:
-    def __init__(self, *, data_root: str | Path | None = None, upload_gcs: bool = False) -> None:
+    def __init__(
+        self, *, data_root: str | Path | None = None, upload_gcs: bool = False,
+        report_path: Path | None = None,
+    ) -> None:
         load_dotenv(PROJECT_ROOT / ".env")
         configured_root = data_root or os.getenv("MARKET_DATA_DIR", "data/bronze/market")
         root = Path(configured_root).expanduser()
         self.data_root = root if root.is_absolute() else PROJECT_ROOT / root
         for table in MARKET_TABLES:
             (self.data_root / table).mkdir(parents=True, exist_ok=True)
-        self.report_path = PROJECT_ROOT / "data" / "reports" / "coverage.csv"
+        self.report_path = self.data_root / report_path if report_path else PROJECT_ROOT / "data" / "reports" / "coverage.csv"
         self.gcs = GCSStore() if upload_gcs else None
 
     def _redact(self, value: object) -> str:
@@ -135,6 +138,8 @@ class ParquetLake:
         start: str = "",
         end: str = "",
         note: str = "",
+        batch_key: str = "",
+        status: str = "OK",
     ) -> Path | None:
         if frame is None or frame.empty:
             self.record(
@@ -180,10 +185,20 @@ class ParquetLake:
             partition /= f"asset={_slug(asset)}"
         if interval:
             partition /= f"interval={_slug(interval)}"
-        partition /= f"ingestion_date={datetime.now(TZ).date().isoformat()}"
+        if batch_key:
+            partition /= f"request={_slug(batch_key)}"
+            filename = "part.parquet"
+        else:
+            partition /= f"ingestion_date={datetime.now(TZ).date().isoformat()}"
+            filename = f"part-{datetime.now(TZ).strftime('%H%M%S%f')}-{uuid4().hex[:8]}.parquet"
         partition.mkdir(parents=True, exist_ok=True)
-        output_path = partition / f"part-{datetime.now(TZ).strftime('%H%M%S%f')}-{uuid4().hex[:8]}.parquet"
-        data.to_parquet(output_path, index=False)
+        output_path = partition / filename
+        temporary = partition / f".{uuid4().hex}.tmp"
+        try:
+            data.to_parquet(temporary, index=False)
+            temporary.replace(output_path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
         gcs_uri = ""
         if self.gcs is not None:
@@ -204,7 +219,7 @@ class ParquetLake:
                 "actual_start": actual_start,
                 "actual_end": actual_end,
                 "rows": len(data),
-                "status": "OK",
+                "status": status,
                 "local_path": str(output_path),
                 "gcs_uri": gcs_uri,
                 "note": self._redact(note),
