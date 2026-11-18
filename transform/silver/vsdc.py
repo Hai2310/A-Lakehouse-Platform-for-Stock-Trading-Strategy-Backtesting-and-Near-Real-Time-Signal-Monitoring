@@ -70,3 +70,8 @@ def _section(lines: list[str], event_type: str, multiple: bool) -> list[str]:
             end = headings[index + 1][0] if index + 1 < len(headings) else len(lines)
             return lines[start:end]
     return []
+
+
+def _match(lines: list[str], pattern: str) -> str | None:
+    values = {m.group(1).strip() for line in lines if (m := re.search(pattern, line))}
+    return next(iter(values)) if len(values) == 1 else None
