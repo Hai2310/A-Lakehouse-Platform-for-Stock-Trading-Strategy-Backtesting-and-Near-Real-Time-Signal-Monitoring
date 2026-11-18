@@ -116,3 +116,31 @@ def build_bars(bronze: Path, stage: Path, quarantine: Path, identity: Identity, 
                 path = Path(temporary) / f"{number}-{group_index}.parquet"
                 group.to_parquet(path, index=False)
                 buckets[key].append(path)
+
+        for (interval, period), bucket_files in sorted(buckets.items()):
+            frame = pd.concat([pd.read_parquet(path) for path in bucket_files], ignore_index=True)
+            good, bad = _validate_rows(frame, table)
+            good = _enrich(good, table, identity)
+            expected_interval = good.interval.isin(["1m", "5m"]) if table.startswith("intraday") else good.interval.eq("1D")
+            invalid = good.instrument_id.isna() | ~expected_interval
+            if invalid.any():
+                bad = pd.concat([bad, good.loc[invalid].assign(rejection_reason="unresolved_identity_or_interval")], ignore_index=True)
+                good = good.loc[~invalid]
+            duplicate = int(bad.rejection_reason.eq("duplicate_key").sum())
+            counts["duplicate_rows"] += duplicate
+            counts["rejected_rows"] += len(bad) - duplicate
+            counts["accepted_rows"] += len(good)
+            partition = Path(f"timeframe={interval}") / f"period={period}" / "data.parquet"
+            if not bad.empty:
+                _write_snapshot(bad, quarantine / table / partition)
+            if not good.empty:
+                _write_snapshot(good.assign(silver_run_id=run_id, schema_version="1"), stage / "market" / table / partition)
+                coverage = _coverage(good)
+                _write_snapshot(coverage.assign(silver_run_id=run_id, schema_version="1"),
+                                stage / "quality" / "data_coverage" / f"bar_table={table}" / partition)
+                observed = coverage.dropna(subset=["exchange"]).groupby(["exchange", "trading_date"], as_index=False).agg(
+                    first_observed_bar_utc=("first_time_utc", "min"), last_observed_bar_utc=("last_time_utc", "max"))
+                observations.append(observed.assign(interval=interval))
+    if not counts["accepted_rows"]:
+        raise ValueError(f"No valid bars remain for {table}")
+    return dict(table=table, bronze_files=len(files), **counts), observations
