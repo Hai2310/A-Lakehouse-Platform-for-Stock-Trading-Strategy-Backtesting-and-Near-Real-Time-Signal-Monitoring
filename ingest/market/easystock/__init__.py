@@ -1,0 +1,1 @@
+"""Public EasyStock daily data."""

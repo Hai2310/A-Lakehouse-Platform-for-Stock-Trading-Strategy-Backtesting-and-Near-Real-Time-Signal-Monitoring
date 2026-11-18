@@ -1,0 +1,1 @@
+"""Entrade public chart data."""
