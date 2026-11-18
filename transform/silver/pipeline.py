@@ -98,3 +98,18 @@ def run(bronze: Path, output: Path, quarantine_root: Path) -> Path:
                      note="Observed days only. Expected bars and completeness are unknown.")
         summaries.append(entry)
         _quality(entry)
+
+        report = pd.DataFrame(summaries).assign(run_id=run_id, schema_version="1")
+        report.to_csv(stage / "quality_report.csv", index=False)
+        published = runs / run_id
+        stage.rename(published)
+
+    pointer = output / f".current-{run_id}"
+    try:
+        pointer.symlink_to(Path("_runs") / run_id, target_is_directory=True)
+        pointer.replace(output / "current")
+    finally:
+        pointer.unlink(missing_ok=True)
+    print(f"Silver: {output / 'current'}", flush=True)
+    print(f"Quality: {published / 'quality_report.csv'}", flush=True)
+    return published
