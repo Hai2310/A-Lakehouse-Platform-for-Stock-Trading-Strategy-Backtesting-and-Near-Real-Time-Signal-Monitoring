@@ -92,3 +92,51 @@ def fetch_notice(job: dict, sessions: local, pace: RequestPacer) -> dict:
             sessions.http.close()
             sessions.http = requests.Session()
             time.sleep(3 * (attempt + 1))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--coverage-report", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_ROOT)
+    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--pause", type=float, default=0.18)
+    args = parser.parse_args()
+    if args.workers < 1 or not 0 <= args.pause < float("inf"):
+        parser.error("Invalid --workers or --pause")
+
+    calendar_report = pd.read_csv(args.coverage_report)
+    if not calendar_report.status.eq("OK").all():
+        parser.error("Finish the calendar crawl before fetching notice details")
+    calendar = pd.concat([pd.read_parquet(path) for path in calendar_report.local_path], ignore_index=True)
+    revisions = calendar.title.str.contains(r"điều chỉnh|đính chính|h[ủuỷ]y|thay đổi|hoãn", case=False, regex=True)
+    eligible = calendar.loc[calendar.event_types.ne("OTHER") | revisions].drop_duplicates("notice_id")
+    eligible = eligible.sort_values(["record_date", "notice_id"])
+    key = args.coverage_report.stem.removeprefix("coverage_")
+    root = args.output_dir.resolve()
+    output = root / "notice_details" / "source=vsdc" / f"request={key}"
+    report_path = root / "_reports" / f"notice_details_{key}.csv"
+    pace, sessions = RequestPacer(args.pause), local()
+    totals = []
+    print(f"VSDC notice details: {len(eligible)} notices", flush=True)
+    columns = ["notice_id", "source_url", "record_date", "symbol", "title", "event_types"]
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        for year, records in eligible.groupby(eligible.record_date.dt.year):
+            for offset in range(0, len(records), BATCH_SIZE):
+                group = records.iloc[offset: offset + BATCH_SIZE]
+                path = output / f"record_year={year}" / f"part-{offset:05d}.parquet"
+                previous = pd.read_parquet(path) if path.is_file() else pd.DataFrame(columns=["notice_id", "status"])
+                valid = previous.loc[previous.status.eq("OK") & previous.notice_id.isin(group.notice_id)]
+                pending = group.loc[~group.notice_id.isin(valid.notice_id), columns].to_dict("records")
+                final = valid
+                if pending:
+                    results = list(pool.map(lambda item: fetch_notice(item, sessions, pace), pending))
+                    final = pd.concat([valid, pd.DataFrame(results)], ignore_index=True) if not valid.empty else pd.DataFrame(results)
+                    final = final.sort_values(["record_date", "notice_id"])
+                    atomic_write(path, lambda temp: final.to_parquet(temp, index=False))
+                ok = int(final.status.eq("OK").sum())
+                totals.append(dict(year=year, offset=offset, expected=len(group), saved=ok,
+                                   failed=len(group)-ok, local_path=path))
+                atomic_write(report_path, lambda temp: pd.DataFrame(totals).to_csv(temp, index=False))
+                print(f"[{year} {offset:05d}] {ok}/{len(group)} saved", flush=True)
+    print(f"Coverage: {report_path}", flush=True)
+    return int(any(item["failed"] for item in totals))
