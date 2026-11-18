@@ -40,3 +40,17 @@ def _event_types(title: str, tags: str) -> list[str]:
         if label in tags:
             types.append(label)
     return types or ["UNCLASSIFIED_REVISION" if re.search(REVISION, title) else "OTHER"]
+
+
+def _section_type(heading: str) -> str | None:
+    if "quyền mua" in heading or "chào bán" in heading:
+        return "RIGHTS_ISSUE"
+    if "cổ tức" in heading:
+        if "bằng cổ phiếu" in heading:
+            return "STOCK_DIVIDEND"
+        return "CASH_DIVIDEND" if "tiền" in heading else "DIVIDEND_UNSPECIFIED"
+    if "cổ phiếu thưởng" in heading or "thưởng cổ phiếu" in heading:
+        return "BONUS_SHARES"
+    if "tách cổ phiếu" in heading or "gộp cổ phiếu" in heading:
+        return "SPLIT"
+    return None
