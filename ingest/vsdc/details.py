@@ -52,3 +52,16 @@ class Article(HTMLParser):
             self.depth -= 1
             if self.depth == 0:
                 self.end = self.character_index()
+
+
+def parse_notice(page: str) -> tuple[str, str]:
+    article = Article(page)
+    article.feed(page)
+    if article.start is None or article.end is None:
+        raise ValueError("Missing VSDC article body")
+    body = page[article.start:article.end].strip()
+    if not body:
+        raise ValueError("Empty VSDC article body")
+    timestamp = UPDATED.search(page)
+    value = PAGE_DATE.search(unescape(timestamp.group(1))) if timestamp else None
+    return body, value.group(0) if value else ""
