@@ -65,3 +65,30 @@ def parse_notice(page: str) -> tuple[str, str]:
     timestamp = UPDATED.search(page)
     value = PAGE_DATE.search(unescape(timestamp.group(1))) if timestamp else None
     return body, value.group(0) if value else ""
+
+
+def fetch_notice(job: dict, sessions: local, pace: RequestPacer) -> dict:
+    base = {**job, "source": "vsdc", "fetched_at": datetime.now(TZ).isoformat()}
+    if not VSDC_LINK.fullmatch(job["source_url"]):
+        return dict(base, status="FAILED", error="Unrecognized VSDC notice URL")
+    if not hasattr(sessions, "http"):
+        sessions.http = requests.Session()
+    for attempt in range(3):
+        try:
+            pace.wait()
+            url = job["source_url"]
+            if attempt != 1:
+                url = url.replace("https://vsdc.vn/ad", "https://vsdc.vn/vi/ad", 1)
+            response = sessions.http.get(url, timeout=(8, 30))
+            response.raise_for_status()
+            body, updated = parse_notice(response.text)
+            return dict(base, status="OK", error="", article_html=body, source_updated_at_text=updated,
+                        body_sha256=sha256(body.encode()).hexdigest())
+        except (requests.RequestException, ValueError) as exc:
+            status = exc.response.status_code if isinstance(exc, requests.HTTPError) else None
+            if attempt == 2 or status not in {None, 429, 500, 502, 503, 504}:
+                error = f"{exc} ({len(response.content)} bytes at {response.url})" if isinstance(exc, ValueError) else str(exc)
+                return dict(base, status="FAILED", error=error)
+            sessions.http.close()
+            sessions.http = requests.Session()
+            time.sleep(3 * (attempt + 1))
