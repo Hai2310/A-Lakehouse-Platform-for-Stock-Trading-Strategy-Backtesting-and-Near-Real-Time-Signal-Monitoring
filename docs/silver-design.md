@@ -85,3 +85,13 @@ data/bronze/{market,vsdc,bctc}
 | 3 | Thêm `transform/silver/bctc.py` sau khi có mẫu thật từ FHSC. | Một mã có ba báo cáo, quý và năm. Join theo thời gian chọn đúng phiên bản có thể sử dụng tại ngày quyết định. |
 | 4 | Chạy kiểm tra tổng thể, sau đó nối Silver sang Gold. | Chạy lại không tăng số khóa, các phân vùng lỗi có báo cáo, truy vấn trước ngày công bố cho kết quả đúng và không có dữ liệu intraday bị điền giả. |
 
+## Chạy Silver Market và VSDC hiện tại
+
+```bash
+source .venv/bin/activate
+python -m transform.silver.pipeline
+```
+
+Lệnh tạo 13 bảng từ Bronze Market và VSDC. Mỗi lượt publish một snapshot trong `data/silver/_runs/` và cập nhật con trỏ `data/silver/current/` sau khi đã ghi đủ các bảng. Đọc từng thư mục bảng trong snapshot bằng Parquet dataset. Báo cáo tại `data/silver/current/quality_report.csv`, các dòng lỗi được ghi tại `data/quarantine/silver/`.
+
+Lịch và độ phủ trong bản local dựa trên nến quan sát được. Phiên chính thức, số nến kỳ vọng, điều kiện `available_at_utc` và lịch sử hiệu lực chưa xác minh được giữ trống hoặc có nhãn kiểm tra. Mốc cập nhật của VSDC được lưu riêng với ngày công bố. Great Expectations và Soda là bước kiểm tra được đề xuất sau bản local.
