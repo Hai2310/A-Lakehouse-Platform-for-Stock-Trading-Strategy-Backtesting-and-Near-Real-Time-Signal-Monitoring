@@ -38,3 +38,13 @@ def utc(values: pd.Series) -> pd.Series:
     result = pd.to_datetime(values.where(has_zone), utc=True, format="mixed", errors="coerce")
     local = pd.to_datetime(values.where(~has_zone), format="mixed", errors="coerce")
     return result.fillna(local.dt.tz_localize("Asia/Ho_Chi_Minh", ambiguous="NaT", nonexistent="NaT").dt.tz_convert("UTC"))
+
+
+def reference_frame(root: Path, table: str) -> pd.DataFrame:
+    frame = _canonicalize(read_table(root / table), table)
+    observed = utc(series(frame, "snapshot_at")).fillna(utc(series(frame, "ingested_at")))
+    exchange = venue(series(frame, "exchange")).fillna(venue(series(frame, "marketid")))
+    frame["exchange"] = exchange
+    frame["observed_at_utc"] = observed
+    frame["evidence_date"] = observed.dt.tz_convert("Asia/Ho_Chi_Minh").dt.tz_localize(None).dt.normalize()
+    return frame
