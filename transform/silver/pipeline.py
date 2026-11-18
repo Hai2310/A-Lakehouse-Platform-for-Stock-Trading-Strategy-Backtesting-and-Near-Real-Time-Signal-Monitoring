@@ -51,3 +51,50 @@ def _calendar(parts):
         first_observed_bar_utc=("first_observed_bar_utc", "min"), last_observed_bar_utc=("last_observed_bar_utc", "max"))
     return calendar.assign(calendar_version="BRONZE_OBSERVED_V1", session_segment="UNVERIFIED", is_official=False,
                            session_start_utc=pd.NaT, session_end_utc=pd.NaT, source="bronze_bar_observations")
+
+
+def run(bronze: Path, output: Path, quarantine_root: Path) -> Path:
+    market, vsdc = bronze / "market", bronze / "vsdc"
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid4().hex[:8]
+    runs = output / "_runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    quarantine = quarantine_root / f"run={run_id}"
+    summaries = []
+    with TemporaryDirectory(prefix=".building-", dir=runs) as tmp:
+        stage = Path(tmp)
+        raw = {table: reference_frame(market, table) for table in CATALOG_TABLES}
+        calendar = read_table(vsdc / "corporate_actions")
+        identity = Identity(raw["securities"], raw["securities_details"], calendar)
+        for table, (frame, keys) in build_references(raw, identity, INDEX_VENUES).items():
+            domain = "reference" if table == "security_symbol_history" else "market"
+            entry = _publish_table(frame, keys, table, domain, stage, quarantine, run_id)
+            summaries.append(entry)
+            _quality(entry)
+
+        events = build_events(vsdc, calendar, identity)
+        entry = _publish_table(events, ["event_id", "revision_id", "security_id"], "corporate_actions", "vsdc", stage, quarantine, run_id)
+        entry.update(status="WARN", note="Verify terms, revision links and initial publication before PIT use.")
+        summaries.append(entry)
+        _quality(entry)
+
+        observations = []
+        for table in BAR_TABLES:
+            entry, parts = build_bars(market, stage, quarantine / "market", identity, table, run_id)
+            entry.update(status="WARN", note="Observed price coverage. Availability and historical identity not certified.")
+            observations.extend(parts)
+            summaries.append(entry)
+            _quality(entry)
+
+        calendar = _calendar(observations)
+        entry = _publish_table(calendar, ["exchange", "trading_date", "calendar_version"], "trading_calendar",
+                               "reference", stage, quarantine, run_id)
+        entry.update(status="WARN", note="Observed trading dates from Bronze bars. Official expected sessions unavailable.")
+        summaries.append(entry)
+        _quality(entry)
+        from pyarrow.parquet import ParquetFile
+
+        coverage_rows = sum(ParquetFile(p).metadata.num_rows for p in (stage / "quality" / "data_coverage").rglob("*.parquet"))
+        entry = dict(table="data_coverage", accepted_rows=coverage_rows, status="WARN",
+                     note="Observed days only. Expected bars and completeness are unknown.")
+        summaries.append(entry)
+        _quality(entry)
