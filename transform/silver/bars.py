@@ -51,3 +51,38 @@ def _standardize(frame: pd.DataFrame) -> pd.DataFrame:
     for name in (*PRICE_FIELDS, "volume"):
         data[name] = pd.to_numeric(data[name], errors="coerce").astype("float64")
     return data
+
+
+def _enrich(frame: pd.DataFrame, table: str, identity: Identity) -> pd.DataFrame:
+    data = frame.copy()
+    is_index = table.endswith("index")
+    if is_index:
+        data["index_id"] = "INDEX:" + data.symbol
+        data["exchange"] = data.symbol.map(INDEX_VENUES).astype("string")
+        data["identity_status"] = "SOURCE_INDEX_CODE"
+    else:
+        data = identity.attach(data)
+    data["instrument_id"] = data["index_id" if is_index else "security_id"]
+    data["instrument_type"] = "index" if is_index else data.asset
+    data["time"] = data.time.dt.tz_convert("UTC")
+    local_time = data.time.dt.tz_convert("Asia/Ho_Chi_Minh")
+    data["trading_date"] = local_time.dt.tz_localize(None).dt.normalize()
+    data["observed_at_utc"] = utc(data.ingested_at)
+    data["bar_origin"] = pd.Series("UNVERIFIED", index=data.index, dtype="string").mask(
+        data.source.eq("dnse"), "DIRECT").mask(data.source.eq("mvp"), "DERIVED_1M")
+    dnse_equity = data.source.eq("dnse") & data.asset.eq("equity")
+    points = data.asset.isin(["index", "futures"])
+    data["source_price_unit"] = pd.Series("UNKNOWN", index=data.index, dtype="string").mask(points, "INDEX_POINT").mask(dnse_equity, "THOUSAND_VND")
+    data["price_unit"] = data.source_price_unit.replace("THOUSAND_VND", "VND")
+    data["price_basis"] = pd.Series("UNKNOWN", index=data.index, dtype="string").mask(points, "INDEX_POINT").mask(dnse_equity, "PROVIDER_ADJUSTED")
+    for name in PRICE_FIELDS:
+        data[f"{name}_source"] = data[name]
+        data[name] = data[name].where(~dnse_equity, data[name] * 1000)
+    data["volume_shares"] = data.volume.where(dnse_equity)
+    is_regular_label = data.interval.isin(["1m", "5m"]) & data.source.eq("dnse") & local_time.dt.strftime("%H:%M").lt("14:45")
+    data["bar_start_utc"] = data.time.where(is_regular_label)
+    duration = pd.to_timedelta(data.interval.map({"1m": 1, "5m": 5}), unit="min")
+    data["bar_end_utc"] = data.bar_start_utc + duration
+    data["available_at_utc"] = pd.Series(pd.NaT, dtype="datetime64[ns, UTC]", index=data.index)
+    data["quality_status"] = "WARN"
+    return data
