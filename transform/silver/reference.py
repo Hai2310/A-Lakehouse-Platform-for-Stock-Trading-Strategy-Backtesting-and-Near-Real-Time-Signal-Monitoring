@@ -99,3 +99,19 @@ def build_references(raw: dict[str, pd.DataFrame], identity: Identity, indexes: 
     prices["last_price_source"] = pd.to_numeric(series(prices, "matchprice"), errors="coerce")
     prices["last_price_vnd"] = prices.last_price_source.where(prices.source.eq("dnse")) * 1000
     prices["snapshot_date"] = prices.observed_at_utc.dt.tz_convert("Asia/Ho_Chi_Minh").dt.strftime("%Y-%m-%d")
+
+    catalog = identity.attach(raw["securities"])
+    identities = identity.evidence.loc[identity.evidence.identity_status.eq("SOURCE_ISIN")].copy()
+    master = pd.concat([identities, catalog], ignore_index=True)
+    master["_priority"] = master.source.map({"dnse": 2, "vsdc": 0}).fillna(1)
+    master = master.sort_values(["_priority", "observed_at_utc"], na_position="first").drop(columns="_priority")
+    indices = raw["index_list"].copy()
+    indices["source_index_id"] = series(indices, "index_id")
+    indices["index_id"] = "INDEX:" + indices.symbol
+    indices["exchange"] = indices.exchange.fillna(indices.symbol.map(indexes))
+    # The price history contains index identifiers omitted by the built-in group catalogue.
+    absent = sorted(set(indexes) - set(indices.symbol.dropna()))
+    if absent:
+        more = pd.DataFrame({"symbol": absent, "index_id": [f"INDEX:{s}" for s in absent],
+                             "exchange": [indexes[s] for s in absent], "source": "market_index_mapping"})
+        indices = pd.concat([indices, more], ignore_index=True)
