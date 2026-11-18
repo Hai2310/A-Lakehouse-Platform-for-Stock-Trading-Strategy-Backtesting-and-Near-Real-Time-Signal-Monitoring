@@ -95,3 +95,24 @@ def _coverage(frame: pd.DataFrame) -> pd.DataFrame:
     return coverage.assign(
         calendar_version="BRONZE_OBSERVED_V1", expected_bars=pd.Series(pd.NA, index=coverage.index, dtype="Int64"),
         is_complete=pd.Series(pd.NA, index=coverage.index, dtype="boolean"), coverage_status="OBSERVED_ONLY")
+
+
+def build_bars(bronze: Path, stage: Path, quarantine: Path, identity: Identity, table: str, run_id: str) -> tuple[dict, list[pd.DataFrame]]:
+    files = sorted((bronze / table).rglob("*.parquet"))
+    if not files:
+        raise FileNotFoundError(f"No Bronze files for {table}")
+    counts = dict(input_rows=0, accepted_rows=0, rejected_rows=0, duplicate_rows=0)
+    observations = []
+    with TemporaryDirectory(prefix=f".{table}-", dir=stage) as temporary:
+        buckets = defaultdict(list)
+        for number, batch in enumerate(_read_batches(files)):
+            data = _standardize(batch)
+            counts["input_rows"] += len(data)
+            labels = data.time.dt.tz_convert("Asia/Ho_Chi_Minh").dt.strftime("%Y-%m" if table.startswith("intraday") else "%Y")
+            intervals = data.interval.where(data.interval.isin(["1D", "1m", "5m"]), "unknown")
+            groups = data.groupby([intervals, labels.fillna("unparsed")], sort=False)
+            for group_index, ((interval, period), group) in enumerate(groups):
+                key = (interval, period)
+                path = Path(temporary) / f"{number}-{group_index}.parquet"
+                group.to_parquet(path, index=False)
+                buckets[key].append(path)
