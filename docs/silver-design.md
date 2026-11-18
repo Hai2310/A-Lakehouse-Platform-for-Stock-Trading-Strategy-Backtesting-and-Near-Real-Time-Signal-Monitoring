@@ -46,3 +46,11 @@ Một thông báo có thể tạo nhiều dòng, mỗi dòng ứng với một q
 
 Khóa chung là `security_id, fiscal_period_end, period_type, statement_scope, source, revision_id`. Quý và năm dùng chung mỗi bảng. Giữ `published_at_utc`, `available_at_utc`, `observed_at_utc`, tiền tệ và đơn vị gốc. Báo cáo hợp nhất và riêng lẻ có khóa riêng. Báo cáo chưa rõ kỳ hoặc phạm vi đi vào quarantine vì thiếu khóa. Báo cáo thiếu ngày công bố được gắn `WARN` và loại khỏi truy vấn point-in-time. Chỉ dùng kỳ lũy kế để tính số quý riêng khi có đủ kỳ đối chiếu và cùng phạm vi báo cáo. Các yếu tố như ROE và P/E được tính ở Gold.
 
+### Bảng hỗ trợ · 3 bảng
+
+| Bảng | Khóa | Vai trò |
+|---|---|---|
+| `security_symbol_history` | `security_id, symbol, exchange, valid_from` | Ánh xạ mã và ISIN theo khoảng hiệu lực. Giữ `observed_at_utc` và bằng chứng cho ngày bắt đầu/kết thúc. |
+| `trading_calendar` | `exchange, trading_date, session_segment, calendar_version` | Lịch theo sàn, đoạn phiên sáng/chiều/đấu giá, giờ bắt đầu/kết thúc và ngoại lệ theo thời kỳ. |
+| `data_coverage` | `instrument_type, instrument_id, interval, source, bar_origin, trading_date, calendar_version` | Số nến kỳ vọng nếu có đủ căn cứ từ lịch và chính sách nguồn, số nến nhận, mốc đầu/cuối, khoảng thiếu và lý do đã xác minh. |
+
