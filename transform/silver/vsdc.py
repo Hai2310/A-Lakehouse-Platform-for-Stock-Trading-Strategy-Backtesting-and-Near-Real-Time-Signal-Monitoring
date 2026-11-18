@@ -25,3 +25,18 @@ def _lines(value: object) -> list[str]:
     value = re.sub(r"<\s*(?:br\b[^>]*|/(?:p|div|tr|li|td|h[1-6]))\s*>", "\n", value, flags=re.I)
     text = unescape(re.sub(r"<[^>]+>", "", value))
     return [" ".join(normalize("NFC", line).lower().split()) for line in text.splitlines() if line.strip()]
+
+
+def _event_types(title: str, tags: str) -> list[str]:
+    types = []
+    if "DIVIDEND" in tags or "cổ tức" in title:
+        if "tiền" in title:
+            types.append("CASH_DIVIDEND")
+        if "bằng cổ phiếu" in title or re.search(r"cổ tức[^:;]*tiền[^:;]*và cổ phiếu", title):
+            types.append("STOCK_DIVIDEND")
+        if not types:
+            types.append("DIVIDEND_UNSPECIFIED")
+    for label in ("RIGHTS_ISSUE", "BONUS_SHARES", "SPLIT"):
+        if label in tags:
+            types.append(label)
+    return types or ["UNCLASSIFIED_REVISION" if re.search(REVISION, title) else "OTHER"]
