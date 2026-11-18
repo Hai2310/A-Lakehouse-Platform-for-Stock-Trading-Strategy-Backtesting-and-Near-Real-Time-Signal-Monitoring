@@ -67,3 +67,22 @@ class Identity:
         self.by_pair = pairs.loc[~ambiguous].set_index(["symbol", "exchange"])["isin"]
         self.ambiguous = pairs.loc[ambiguous].set_index(["symbol", "exchange"]).index
         self.evidence = self.attach(evidence.dropna(subset=["symbol"]))
+
+    def attach(self, frame: pd.DataFrame, *, allow_venue_hint=True) -> pd.DataFrame:
+        result = frame.copy()
+        symbol = result.symbol.astype("string").str.upper().str.strip().replace("", pd.NA)
+        exchange = venue(series(result, "exchange"))
+        if allow_venue_hint:
+            exchange = exchange.fillna(symbol.map(self.venues))
+            exchange = exchange.mask(series(result, "asset").eq("futures").fillna(False), "HNXDS")
+        supplied = series(result, "isin").astype("string").str.upper().str.strip()
+        supplied = supplied.where(supplied.str.fullmatch(r"VN[A-Z0-9]{10}", na=False))
+        lookup = pd.MultiIndex.from_arrays([symbol, exchange])
+        matched = pd.Series(self.by_pair.reindex(lookup).array, index=result.index, dtype="string")
+        fallback = "TICKER:" + exchange.fillna("UNKNOWN") + ":" + symbol
+        ambiguous = pd.Series(lookup.isin(self.ambiguous), index=result.index) & supplied.isna()
+        result["symbol"], result["exchange"], result["isin"] = symbol, exchange, supplied.fillna(matched)
+        result["security_id"] = ("ISIN:" + result["isin"]).fillna(fallback).mask(ambiguous)
+        result["identity_status"] = pd.Series("TICKER_ONLY", index=result.index, dtype="string").mask(
+            matched.notna(), "TICKER_MATCH_OBSERVED").mask(supplied.notna(), "SOURCE_ISIN").mask(ambiguous, "AMBIGUOUS")
+        return result
