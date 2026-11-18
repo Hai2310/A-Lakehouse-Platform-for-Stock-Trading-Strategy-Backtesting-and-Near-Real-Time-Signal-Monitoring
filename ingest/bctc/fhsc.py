@@ -49,6 +49,26 @@ def interval_label(statement: str, period: str) -> str:
     return f"{statement}-{period}"
 
 
+def unwrap_page(body: object) -> list[dict]:
+    """FHSC wraps each page as {error_code, message, data, traceId}; ``data`` holds the period rows."""
+    if body is None:
+        return []
+    if isinstance(body, dict) and "data" in body:
+        code = body.get("error_code", 0)
+        if str(code) not in ("0", "None", ""):
+            raise RuntimeError(f"FHSC error_code={code}: {body.get('message', '')}")
+        body = body["data"]
+    if body is None:
+        return []
+    if isinstance(body, dict):
+        return [body]
+    if isinstance(body, list):
+        if not all(isinstance(row, dict) for row in body):
+            raise TypeError("Unexpected FHSC data rows; expected a list of objects")
+        return body
+    raise TypeError(f"Unexpected FHSC response type: {type(body).__name__}")
+
+
 def fetch_statement(symbol: str, statement: str, period: str) -> pd.DataFrame:
     """One statement for one symbol. Rows are returned as-is, with symbol/statement/period added."""
     import vnstock_oapi as oapi
