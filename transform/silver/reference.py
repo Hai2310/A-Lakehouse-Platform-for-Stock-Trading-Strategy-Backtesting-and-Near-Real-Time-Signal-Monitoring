@@ -19,3 +19,11 @@ def read_table(path: Path) -> pd.DataFrame:
     if not files:
         raise FileNotFoundError(f"No Bronze Parquet in {path}")
     return pd.concat([pd.read_parquet(file).assign(bronze_file=str(file)) for file in files], ignore_index=True)
+
+
+def series(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame[column] if column in frame else pd.Series(pd.NA, index=frame.index, dtype="string")
+
+
+def venue(values: pd.Series) -> pd.Series:
+    return values.astype("string").str.strip().str.upper().replace(VENUES).replace("", pd.NA)
