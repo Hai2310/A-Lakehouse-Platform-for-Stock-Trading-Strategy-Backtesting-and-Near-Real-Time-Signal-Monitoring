@@ -27,3 +27,14 @@ def series(frame: pd.DataFrame, column: str) -> pd.Series:
 
 def venue(values: pd.Series) -> pd.Series:
     return values.astype("string").str.strip().str.upper().replace(VENUES).replace("", pd.NA)
+
+
+def utc(values: pd.Series) -> pd.Series:
+    """Interpret timezone-less source timestamps as exchange-local time."""
+    if isinstance(values.dtype, pd.DatetimeTZDtype):
+        return values.dt.tz_convert("UTC")
+    values = values.astype("string")
+    has_zone = values.str.contains(r"(?:Z|[+-][0-9]{2}:?[0-9]{2})$", case=False, na=False)
+    result = pd.to_datetime(values.where(has_zone), utc=True, format="mixed", errors="coerce")
+    local = pd.to_datetime(values.where(~has_zone), format="mixed", errors="coerce")
+    return result.fillna(local.dt.tz_localize("Asia/Ho_Chi_Minh", ambiguous="NaT", nonexistent="NaT").dt.tz_convert("UTC"))
