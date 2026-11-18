@@ -140,3 +140,7 @@ def main() -> int:
                 print(f"[{year} {offset:05d}] {ok}/{len(group)} saved", flush=True)
     print(f"Coverage: {report_path}", flush=True)
     return int(any(item["failed"] for item in totals))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
