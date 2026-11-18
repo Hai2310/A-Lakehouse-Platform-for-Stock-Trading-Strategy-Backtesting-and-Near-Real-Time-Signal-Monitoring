@@ -84,3 +84,30 @@ def _date(lines: list[str], label: str):
 
 def _money(value: str | None):
     return Decimal(value.replace(".", "").replace(" ", "").replace(",", ".")) if value else None
+
+
+def parse_terms(lines: list[str], kind: str) -> dict:
+    terms = dict(cash_per_share_vnd=None, subscription_price_vnd=None, rights_old_shares=None,
+                 rights_new_shares=None, rate_percent=None, payment_date=pd.NaT)
+    rate_lines = [line for line in lines if re.match(r"^(?:[-+–]\s*)?tỷ lệ\b", line)]
+    if kind == "CASH_DIVIDEND":
+        cash = _match(rate_lines, r"cổ phiếu\s+(?:được\s+)?nhận\s+" + AMOUNT)
+        if cash is None:
+            cash = _match(rate_lines, AMOUNT + r"\s*/\s*(?:cổ phiếu|cp)\b")
+        terms["cash_per_share_vnd"] = _money(cash)
+        terms["payment_date"] = _date(lines, "ngày thanh toán|thời gian thanh toán|ngày chi trả|thời gian thực hiện")
+    elif kind == "RIGHTS_ISSUE":
+        terms["subscription_price_vnd"] = _money(_match(lines, r"^(?:[-+–]\s*)?(?:giá phát hành|giá chào bán)\s*:\s*" + AMOUNT))
+    if kind in {"CASH_DIVIDEND", "STOCK_DIVIDEND", "RIGHTS_ISSUE", "BONUS_SHARES", "SPLIT"}:
+        rate = _match(rate_lines, RATE)
+        terms["rate_percent"] = Decimal(rate.replace(",", ".")) if rate else None
+    if kind in {"STOCK_DIVIDEND", "RIGHTS_ISSUE", "BONUS_SHARES", "SPLIT"}:
+        explicit = r"(\d[\d.]*)\s+(?:cổ phiếu cũ|quyền nhận cổ tức|quyền mua)[^\d]{1,90}(\d[\d.]*)\s+cổ phiếu mới"
+        ratio = {m.groups() for line in rate_lines if (m := re.search(explicit, line))}
+        if not ratio and kind != "SPLIT":
+            ratio = {m.groups() for line in rate_lines if (m := re.search(RATIO, line))}
+        if len(ratio) == 1:
+            old, new = (int(item.replace(".", "")) for item in next(iter(ratio)))
+            if old > 0 and new > 0:
+                terms.update(rights_old_shares=old, rights_new_shares=new)
+    return terms
