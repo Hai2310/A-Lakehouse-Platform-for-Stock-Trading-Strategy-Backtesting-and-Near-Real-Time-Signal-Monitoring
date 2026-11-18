@@ -115,3 +115,8 @@ def build_references(raw: dict[str, pd.DataFrame], identity: Identity, indexes: 
         more = pd.DataFrame({"symbol": absent, "index_id": [f"INDEX:{s}" for s in absent],
                              "exchange": [indexes[s] for s in absent], "source": "market_index_mapping"})
         indices = pd.concat([indices, more], ignore_index=True)
+    members = identity.attach(raw["index_components"])
+    members["index_id"] = "INDEX:" + members.index_symbol.astype("string")
+    members["snapshot_id"] = series(members, "publication_period").astype("string").fillna(members.observed_at_utc.astype("string"))
+    members["effective_from"] = pd.to_datetime(series(members, "effective_from"), errors="coerce")
+    members["availability_basis"] = "SNAPSHOT_ONLY"
