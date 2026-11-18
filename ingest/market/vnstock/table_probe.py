@@ -30,6 +30,18 @@ def dnse_instrument(symbol: str, snapshot_at: str) -> pd.DataFrame:
     return pd.DataFrame(rows).assign(symbol=symbol, snapshot_at=snapshot_at)
 
 
+def dnse_latest_trade(symbol: str) -> pd.DataFrame:
+    """Return the latest observed trade snapshot for the main board."""
+    import vnstock_oapi as oapi
+
+    rows = []
+    for envelope in oapi.source('dnse').raw('price/{symbol}/trades/latest', symbol=symbol):
+        if not isinstance(envelope.body, dict) or not isinstance(envelope.body.get('trades'), list):
+            raise TypeError('Unexpected DNSE latest trade response')
+        rows.extend(row for row in envelope.body['trades'] if row.get('boardId') == 'G1')
+    return pd.DataFrame(rows)
+
+
 def run_remaining_tables(symbols: list[str], *, start: str, end: str,
                          indices: tuple[str, ...] = ('VNINDEX', 'VN30', 'HNXINDEX', 'UPCOMINDEX')):
     """Fetch seven tables, retaining frames and per-request errors only in RAM.
