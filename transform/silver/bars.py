@@ -38,3 +38,16 @@ def _read_batches(files):
             pending, count = [], 0
     if pending:
         yield pd.concat(pending, ignore_index=True)
+
+
+def _standardize(frame: pd.DataFrame) -> pd.DataFrame:
+    data = frame.copy()
+    for name in ("symbol", "source", "asset", "interval"):
+        data[name] = data[name].astype("string").str.strip().replace("", pd.NA)
+    data["symbol"] = data.symbol.str.upper()
+    data["source"] = data.source.str.lower()
+    data["asset"] = data.asset.str.lower()
+    data["interval"] = data.interval.str.lower().replace("1d", "1D")
+    for name in (*PRICE_FIELDS, "volume"):
+        data[name] = pd.to_numeric(data[name], errors="coerce").astype("float64")
+    return data
