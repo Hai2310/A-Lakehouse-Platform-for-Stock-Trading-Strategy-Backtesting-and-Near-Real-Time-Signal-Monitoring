@@ -80,3 +80,7 @@ def _match(lines: list[str], pattern: str) -> str | None:
 def _date(lines: list[str], label: str):
     found = _match(lines, rf"^(?:[-+–]\s*)?(?:{label})\s*[:：]\s*(?:ngày\s+|từ ngày\s+)?({DATE})\b")
     return pd.to_datetime(found, format="%d/%m/%Y", errors="coerce") if found else pd.NaT
+
+
+def _money(value: str | None):
+    return Decimal(value.replace(".", "").replace(" ", "").replace(",", ".")) if value else None
