@@ -46,3 +46,9 @@ class Article(HTMLParser):
             if not self.depth:
                 self.start = self.character_index() + len(self.get_starttag_text())
             self.depth += 1
+
+    def handle_endtag(self, tag):
+        if tag == "div" and self.depth:
+            self.depth -= 1
+            if self.depth == 0:
+                self.end = self.character_index()
