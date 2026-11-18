@@ -36,3 +36,13 @@ Thiết kế gồm **16 bảng Silver**, trong đó có **13 bảng nghiệp v�
 
 Một thông báo có thể tạo nhiều dòng, mỗi dòng ứng với một quyền. Ví dụ công bố BLI `36052` tạo một sự kiện cổ tức cổ phiếu và một sự kiện quyền mua. Các bản sửa hoặc hủy được giữ với nguồn dẫn riêng. Chỉ nối chúng với `event_id` cũ khi xác minh đúng sự kiện, nếu còn mơ hồ thì đưa vào danh sách kiểm tra. Lưu tỷ lệ dạng số cổ phiếu cũ/mới hoặc số tiền trên mỗi cổ phiếu với đơn vị rõ ràng.
 
+### BCTC · 3 bảng
+
+| Bảng | Chỉ tiêu ưu tiên |
+|---|---|
+| `income_statement` | Doanh thu thuần, lợi nhuận sau thuế, lợi nhuận thuộc cổ đông công ty mẹ, EPS. |
+| `balance_sheet` | Tổng tài sản, nợ phải trả, vốn chủ sở hữu, tiền và tương đương tiền. |
+| `cash_flow` | Dòng tiền từ kinh doanh, đầu tư và tài chính. |
+
+Khóa chung là `security_id, fiscal_period_end, period_type, statement_scope, source, revision_id`. Quý và năm dùng chung mỗi bảng. Giữ `published_at_utc`, `available_at_utc`, `observed_at_utc`, tiền tệ và đơn vị gốc. Báo cáo hợp nhất và riêng lẻ có khóa riêng. Báo cáo chưa rõ kỳ hoặc phạm vi đi vào quarantine vì thiếu khóa. Báo cáo thiếu ngày công bố được gắn `WARN` và loại khỏi truy vấn point-in-time. Chỉ dùng kỳ lũy kế để tính số quý riêng khi có đủ kỳ đối chiếu và cùng phạm vi báo cáo. Các yếu tố như ROE và P/E được tính ở Gold.
+
