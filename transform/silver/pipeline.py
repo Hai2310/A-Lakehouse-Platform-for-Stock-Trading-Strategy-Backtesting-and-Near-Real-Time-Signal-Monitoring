@@ -113,3 +113,16 @@ def run(bronze: Path, output: Path, quarantine_root: Path) -> Path:
     print(f"Silver: {output / 'current'}", flush=True)
     print(f"Quality: {published / 'quality_report.csv'}", flush=True)
     return published
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bronze-root", type=Path, default=PROJECT_ROOT / "data/bronze")
+    parser.add_argument("--silver-root", type=Path, default=PROJECT_ROOT / "data/silver")
+    parser.add_argument("--quarantine-root", type=Path, default=PROJECT_ROOT / "data/quarantine/silver")
+    args = parser.parse_args()
+    run(_resolve_path(args.bronze_root), _resolve_path(args.silver_root), _resolve_path(args.quarantine_root))
+
+
+if __name__ == "__main__":
+    main()
