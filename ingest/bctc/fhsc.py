@@ -69,23 +69,20 @@ def unwrap_page(body: object) -> list[dict]:
     raise TypeError(f"Unexpected FHSC response type: {type(body).__name__}")
 
 
-def fetch_statement(symbol: str, statement: str, period: str) -> pd.DataFrame:
-    """One statement for one symbol. Rows are returned as-is, with symbol/statement/period added."""
+def fetch_statement(symbol: str, statement: str, period: str) -> tuple[pd.DataFrame, bool]:
+    """One statement for one symbol, all pages. Returns (frame, truncated_by_page_limit)."""
     import vnstock_oapi as oapi
 
-    rows: list = []
-    for item in oapi.source(SOURCE).financials(symbol, statement=statement, period=period):
-        body = getattr(item, "body", item)
-        if isinstance(body, list):
-            rows.extend(body)
-        elif isinstance(body, dict):
-            rows.append(body)
-        else:
-            raise TypeError(f"Unexpected FHSC response type: {type(body).__name__}")
+    rows: list[dict] = []
+    truncated = False
+    for envelope in oapi.source(SOURCE).financials(symbol, statement=statement, period=period):
+        rows.extend(unwrap_page(getattr(envelope, "body", envelope)))
+        if getattr(envelope, "truncated", None):
+            truncated = True
     frame = pd.DataFrame(rows)
     if not frame.empty:
-        frame = frame.assign(symbol=symbol, statement=statement, period=period)
-    return frame
+        frame = frame.assign(symbol=symbol, statement=statement, request_period=period)
+    return frame, truncated
 
 
 def done_jobs(lake: ParquetLake) -> set[tuple[str, str]]:
@@ -119,9 +116,10 @@ def crawl(
     for symbol, statement, period in jobs:
         interval = interval_label(statement, period)
         frame = None
+        truncated = False
         for attempt in range(3):
             try:
-                frame = fetch(symbol, statement, period)
+                frame, truncated = fetch(symbol, statement, period)
                 break
             except Exception as exc:
                 message = _redact(f"{type(exc).__name__}: {exc}")
@@ -135,7 +133,10 @@ def crawl(
                 break
 
         if frame is not None:
-            status = "EMPTY" if frame.empty else "OK"
+            status = "EMPTY" if frame.empty else ("PARTIAL" if truncated else "OK")
+            note = f"FHSC {statement}, {period}. Report data as served; no point-in-time check yet."
+            if truncated:
+                note += " Page limit reached; history may be incomplete."
             lake.write(
                 TABLE,
                 frame,
@@ -143,7 +144,7 @@ def crawl(
                 asset="equity",
                 symbol=symbol,
                 interval=interval,
-                note=f"FHSC {statement}, {period}. Current report data; no point-in-time check yet.",
+                note=note,
                 batch_key=f"{symbol}|{interval}",
                 status=status,
             )
