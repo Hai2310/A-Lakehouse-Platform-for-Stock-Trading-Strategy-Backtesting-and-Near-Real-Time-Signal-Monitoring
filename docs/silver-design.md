@@ -76,3 +76,12 @@ data/bronze/{market,vsdc,bctc}
 - **Great Expectations** kiểm tra schema, khóa và quy tắc bắt buộc trên đầu ra Silver tạm. **Soda** theo dõi số dòng, độ mới và độ phủ theo phân vùng. Hai công cụ được đặt ở bước kiểm tra trước khi publish. Bản local đầu tiên có thể dùng các kiểm tra pandas hiện có và ghi báo cáo vào `data/reports/silver_quality.csv`.
 - Dữ liệu xuất dưới `data/silver/{market,vsdc,bctc,reference,quality}/<table>/`. Nến trong phiên ưu tiên phân vùng theo `interval` và tháng phiên, nến ngày theo năm, BCTC theo năm tài chính và VSDC theo năm chốt quyền. Đọc lại file tạm trước khi publish. Chạy lại cùng đầu vào phải cho cùng khóa và nội dung nghiệp vụ.
 
+## Thứ tự triển khai và nghiệm thu
+
+| Bước | Phần triển khai | Cách kiểm chứng |
+|---|---|---|
+| 1 | Mở rộng `transform/silver/market.py` và chuẩn hóa định danh, lịch phiên, độ phủ. | Với một mã mỗi sàn, đọc được nến `1D`, `5m`, `1m`, kiểm tra giờ phiên, đơn vị nguồn và báo cáo khoảng thiếu thực tế. |
+| 2 | Thêm `transform/silver/vsdc.py` đọc lịch và nội dung công bố. | BLI `36052` tạo hai sự kiện có nguồn dẫn. CLC `35991` có giá trị tiền/cổ phiếu và ngày thanh toán đối chiếu được với bài gốc. |
+| 3 | Thêm `transform/silver/bctc.py` sau khi có mẫu thật từ FHSC. | Một mã có ba báo cáo, quý và năm. Join theo thời gian chọn đúng phiên bản có thể sử dụng tại ngày quyết định. |
+| 4 | Chạy kiểm tra tổng thể, sau đó nối Silver sang Gold. | Chạy lại không tăng số khóa, các phân vùng lỗi có báo cáo, truy vấn trước ngày công bố cho kết quả đúng và không có dữ liệu intraday bị điền giả. |
+
