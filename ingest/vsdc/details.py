@@ -38,3 +38,11 @@ class Article(HTMLParser):
     def character_index(self) -> int:
         line, column = self.getpos()
         return self.lines[line - 1] + column
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "div" or self.end is not None:
+            return
+        if self.depth or "content-category" in dict(attrs).get("class", "").split():
+            if not self.depth:
+                self.start = self.character_index() + len(self.get_starttag_text())
+            self.depth += 1
