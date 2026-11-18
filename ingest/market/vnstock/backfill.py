@@ -7,7 +7,6 @@ from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
-from functools import cache
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -19,7 +18,7 @@ from dotenv import load_dotenv
 
 from ingest.market.common.runner import table_for
 from ingest.market.lake import MARKET_TABLES, PROJECT_ROOT, TZ, ParquetLake
-from ingest.market.vnstock.table_probe import dnse_instrument, safe_message
+from ingest.market.vnstock.table_probe import dnse_instrument, dnse_latest_trade, safe_message
 from transform.silver.normalization import filter_dates
 
 OHLCV = {"time", "open", "high", "low", "close", "volume"}
@@ -205,21 +204,27 @@ def run(args: argparse.Namespace, selected: set[str], today: date) -> int:
                            expected=tuple(batch), asset="equity", note="Current price-board snapshot.")
     elif selected & {"securities_details", "daily_stock_price"}:
         now = datetime.now(TZ).isoformat()
-        for symbol in symbols:
-            @cache
+
+        def snapshot_equity(symbol: str) -> None:
             def definition() -> pd.DataFrame:
                 frame = dnse_instrument(symbol, now)
                 if not frame.empty:
                     frame = frame.loc[frame["boardId"].eq("G1")]
                 return frame.assign(snapshot_date=snapshot)
 
-            for table, note in (
-                ("securities_details", "Trading definition only. FHSC can supply the company profile."),
-                ("daily_stock_price", "Reference/ceiling/floor snapshot only. FHSC can supply full quotes."),
-            ):
-                if table in selected:
-                    crawl.save(table, "dnse", f"{snapshot}|{symbol}", definition,
-                               asset="equity", symbol=symbol, partial=True, note=note)
+            if "securities_details" in selected:
+                crawl.save("securities_details", "dnse", f"{snapshot}|{symbol}", definition,
+                           asset="equity", symbol=symbol, partial=True,
+                           note="Main-board trading definition. FHSC can supply the company profile.")
+            if "daily_stock_price" in selected:
+                crawl.save("daily_stock_price", "dnse", f"{snapshot}|{symbol}|latest_trade",
+                           lambda: dnse_latest_trade(symbol).assign(snapshot_date=snapshot, snapshot_at=now),
+                           asset="equity", symbol=symbol, partial=True,
+                           note="Main-board latest trade snapshot. FHSC can supply the full quote board.")
+
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            for _ in pool.map(snapshot_equity, symbols):
+                pass
 
     def history(job: tuple[str, str, str]) -> None:
         asset, symbol, interval = job
@@ -259,7 +264,7 @@ def main() -> int:
     parser.add_argument("--end", type=date.fromisoformat, default=today)
     parser.add_argument("--output-dir", type=Path, help="Override MARKET_DATA_DIR for local Bronze.")
     parser.add_argument("--pause", type=float, default=0.5, help="Minimum seconds between request starts across workers.")
-    parser.add_argument("--workers", type=int, default=1, help="Maximum number of concurrent OHLCV requests.")
+    parser.add_argument("--workers", type=int, default=1, help="Maximum number of concurrent market requests.")
     parser.add_argument("--quote-batch-size", type=int, default=20)
     parser.add_argument("--refresh", action="store_true", help="Fetch already saved jobs again for the same range.")
     args = parser.parse_args()
