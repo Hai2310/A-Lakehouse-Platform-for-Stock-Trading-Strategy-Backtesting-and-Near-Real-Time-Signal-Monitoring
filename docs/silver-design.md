@@ -28,3 +28,11 @@ Thiết kế gồm **16 bảng Silver**, trong đó có **13 bảng nghiệp v�
 | `index_list` | `index_id` | Định danh chỉ số, mã, tên và sàn. |
 | `index_components` | `index_id, security_id, source, snapshot_id` | Một mã thành viên trong một kỳ công bố. Giữ kỳ công bố, ngày hiệu lực nếu xác minh được, ngày quan sát và các tỷ lệ do nguồn cung cấp. |
 
+### VSDC · 1 bảng
+
+| Bảng | Khóa | Cột chính và ý nghĩa |
+|---|---|---|
+| `corporate_actions` | `event_id, revision_id` | Một phiên bản của một quyền. Có `security_id`, `notice_id`, `event_type`, `status`, `announced_at_utc`, `source_updated_at_utc`, `available_at_utc`, `ex_date`, `record_date`, `payment_date`, `cash_per_share_vnd`, tỷ lệ chuyển đổi và `subscription_price_vnd` nếu phù hợp. |
+
+Một thông báo có thể tạo nhiều dòng, mỗi dòng ứng với một quyền. Ví dụ công bố BLI `36052` tạo một sự kiện cổ tức cổ phiếu và một sự kiện quyền mua. Các bản sửa hoặc hủy được giữ với nguồn dẫn riêng. Chỉ nối chúng với `event_id` cũ khi xác minh đúng sự kiện, nếu còn mơ hồ thì đưa vào danh sách kiểm tra. Lưu tỷ lệ dạng số cổ phiếu cũ/mới hoặc số tiền trên mỗi cổ phiếu với đơn vị rõ ràng.
+
