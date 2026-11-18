@@ -54,3 +54,19 @@ def _section_type(heading: str) -> str | None:
     if "tách cổ phiếu" in heading or "gộp cổ phiếu" in heading:
         return "SPLIT"
     return None
+
+
+def _section(lines: list[str], event_type: str, multiple: bool) -> list[str]:
+    if not multiple:
+        return lines
+    headings = []
+    for index, line in enumerate(lines):
+        if re.match(r"^(?:[a-z0-9]+[)/.]\s+|\s*[-–]\s*)?(?:thực hiện quyền|trả cổ tức|chi trả cổ tức|phát hành cổ phiếu)", line):
+            kind = _section_type(line)
+            if kind:
+                headings.append((index, kind))
+    for index, (start, kind) in enumerate(headings):
+        if kind == event_type:
+            end = headings[index + 1][0] if index + 1 < len(headings) else len(lines)
+            return lines[start:end]
+    return []
