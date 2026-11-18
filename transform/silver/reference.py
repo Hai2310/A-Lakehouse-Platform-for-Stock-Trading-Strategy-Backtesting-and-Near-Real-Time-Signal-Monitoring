@@ -86,3 +86,16 @@ class Identity:
         result["identity_status"] = pd.Series("TICKER_ONLY", index=result.index, dtype="string").mask(
             matched.notna(), "TICKER_MATCH_OBSERVED").mask(supplied.notna(), "SOURCE_ISIN").mask(ambiguous, "AMBIGUOUS")
         return result
+
+
+def build_references(raw: dict[str, pd.DataFrame], identity: Identity, indexes: dict[str, str]):
+    details = identity.attach(raw["securities_details"])
+    prices = identity.attach(raw["daily_stock_price"])
+    for frame, kind in ((details, "TRADING_DEFINITION"), (prices, "LATEST_TRADE")):
+        frame["board"] = series(frame, "boardid").astype("string").fillna("UNSPECIFIED")
+        frame["snapshot_kind"] = frame.source.eq("dnse").map({True: kind, False: "COMPANY_PROFILE" if kind == "TRADING_DEFINITION" else "QUOTE_BOARD"})
+        frame["snapshot_id"] = (frame.exchange.fillna("UNKNOWN") + "|" + frame.board + "|" + frame.observed_at_utc.astype("string"))
+    prices["last_trade_at_utc"] = utc(series(prices, "time")).where(prices.snapshot_kind.eq("LATEST_TRADE"))
+    prices["last_price_source"] = pd.to_numeric(series(prices, "matchprice"), errors="coerce")
+    prices["last_price_vnd"] = prices.last_price_source.where(prices.source.eq("dnse")) * 1000
+    prices["snapshot_date"] = prices.observed_at_utc.dt.tz_convert("Asia/Ho_Chi_Minh").dt.strftime("%Y-%m-%d")
