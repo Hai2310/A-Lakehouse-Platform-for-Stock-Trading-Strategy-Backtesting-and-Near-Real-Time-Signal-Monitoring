@@ -86,3 +86,12 @@ def _enrich(frame: pd.DataFrame, table: str, identity: Identity) -> pd.DataFrame
     data["available_at_utc"] = pd.Series(pd.NaT, dtype="datetime64[ns, UTC]", index=data.index)
     data["quality_status"] = "WARN"
     return data
+
+
+def _coverage(frame: pd.DataFrame) -> pd.DataFrame:
+    keys = ["instrument_type", "instrument_id", "symbol", "exchange", "interval", "source", "bar_origin", "trading_date"]
+    coverage = frame.groupby(keys, dropna=False, as_index=False, sort=False).agg(
+        actual_bars=("time", "size"), first_time_utc=("time", "min"), last_time_utc=("time", "max"))
+    return coverage.assign(
+        calendar_version="BRONZE_OBSERVED_V1", expected_bars=pd.Series(pd.NA, index=coverage.index, dtype="Int64"),
+        is_complete=pd.Series(pd.NA, index=coverage.index, dtype="boolean"), coverage_status="OBSERVED_ONLY")
