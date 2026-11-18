@@ -37,3 +37,17 @@ def _publish_table(frame, keys, table, domain, stage, quarantine, run_id) -> dic
         _write_snapshot(bad, quarantine / domain / table / "rejected.parquet")
     return dict(table=table, input_rows=len(frame), accepted_rows=len(good), rejected_rows=int(missing.sum()),
                 duplicate_rows=int(repeated.sum()), status="WARN" if not bad.empty else "PASS")
+
+
+def _calendar(parts):
+    observations = pd.concat(parts, ignore_index=True)
+    daily = observations.interval.eq("1D")
+    observations["has_daily_bars"] = daily
+    observations["has_intraday_bars"] = ~daily
+    for name in ("first_observed_bar_utc", "last_observed_bar_utc"):
+        observations[name] = observations[name].mask(daily)
+    calendar = observations.groupby(["exchange", "trading_date"], as_index=False).agg(
+        has_daily_bars=("has_daily_bars", "any"), has_intraday_bars=("has_intraday_bars", "any"),
+        first_observed_bar_utc=("first_observed_bar_utc", "min"), last_observed_bar_utc=("last_observed_bar_utc", "max"))
+    return calendar.assign(calendar_version="BRONZE_OBSERVED_V1", session_segment="UNVERIFIED", is_official=False,
+                           session_start_utc=pd.NaT, session_end_utc=pd.NaT, source="bronze_bar_observations")
