@@ -111,3 +111,45 @@ def parse_terms(lines: list[str], kind: str) -> dict:
             if old > 0 and new > 0:
                 terms.update(rights_old_shares=old, rights_new_shares=new)
     return terms
+
+
+def build_events(bronze_root: Path, calendar: pd.DataFrame, identity: Identity) -> pd.DataFrame:
+    notices = read_table(bronze_root / "notice_details")
+    notices = notices.loc[notices.status.eq("OK"), ["notice_id", "article_html", "source_updated_at_text", "body_sha256", "bronze_file"]]
+    merged = calendar.drop_duplicates(["notice_id", "symbol", "record_date"]).merge(
+        notices.drop_duplicates("notice_id"), on="notice_id", how="left", suffixes=("", "_detail"))
+    merged["exchange"] = venue(merged.market)
+    merged["observed_at_utc"] = utc(merged.ingested_at)
+    merged = identity.attach(merged, allow_venue_hint=False)
+    rows = []
+    for item in merged.itertuples(index=False):
+        title = normalize("NFC", item.title).lower()
+        kinds = _event_types(title, str(item.event_types))
+        if kinds == ["OTHER"]:
+            continue
+        lines = _lines(item.article_html)
+        notice_status = "REVISION_UNLINKED" if re.search(REVISION, title) else "ANNOUNCED"
+        if re.match(r"^\s*(?:hủy|huỷ)\b", title.split(":", 1)[-1]):
+            notice_status = "CANCEL_UNLINKED"
+        for kind in kinds:
+            event_lines = _section(lines, kind, len(kinds) > 1)
+            terms = parse_terms(event_lines, kind)
+            rows.append(dict(
+                event_id=f"VSDC:{item.notice_id}:{item.symbol}:{item.record_date:%Y-%m-%d}:{kind}",
+                revision_id=item.body_sha256 if isinstance(item.body_sha256, str) else "CALENDAR_ONLY",
+                security_id=item.security_id, identity_status=item.identity_status, notice_id=item.notice_id,
+                symbol=item.symbol, exchange=item.exchange, isin=item.isin, event_type=kind,
+                status=notice_status, title=item.title, record_date=item.record_date,
+                ex_date=_date(lines, "ngày giao dịch không hưởng quyền"),
+                source_updated_at_text=item.source_updated_at_text, announced_at_utc=pd.NaT, available_at_utc=pd.NaT,
+                observed_at_utc=item.observed_at_utc, source="vsdc", source_url=item.source_url,
+                bronze_file=item.bronze_file, notice_bronze_file=item.bronze_file_detail,
+                has_notice_body=bool(lines), **terms,
+            ))
+    result = pd.DataFrame(rows)
+    updated = result.source_updated_at_text.astype("string").str.replace(r"\s*-\s*", " ", regex=True)
+    result["source_updated_at_utc"] = utc(pd.to_datetime(updated, format="%d/%m/%Y %H:%M:%S", errors="coerce"))
+    for name in ("announced_at_utc", "available_at_utc"):
+        result[name] = result[name].dt.tz_localize("UTC")
+    result["quality_status"] = "WARN"
+    return result
