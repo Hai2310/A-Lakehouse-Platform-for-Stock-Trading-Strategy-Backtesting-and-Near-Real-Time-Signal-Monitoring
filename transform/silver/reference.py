@@ -120,3 +120,19 @@ def build_references(raw: dict[str, pd.DataFrame], identity: Identity, indexes: 
     members["snapshot_id"] = series(members, "publication_period").astype("string").fillna(members.observed_at_utc.astype("string"))
     members["effective_from"] = pd.to_datetime(series(members, "effective_from"), errors="coerce")
     members["availability_basis"] = "SNAPSHOT_ONLY"
+    history = identity.evidence.dropna(subset=["security_id", "exchange", "observed_at_utc"])
+    history = history.groupby(["security_id", "symbol", "exchange", "source", "identity_status"], as_index=False).agg(
+        first_observed_at_utc=("observed_at_utc", "min"), last_observed_at_utc=("observed_at_utc", "max"),
+        first_evidence_date=("evidence_date", "min"), last_evidence_date=("evidence_date", "max"),
+        isin=("isin", "last"), evidence_file=("bronze_file", "last"))
+    history["valid_from"] = pd.NaT
+    history["valid_to"] = pd.NaT
+    history["mapping_basis"] = "OBSERVED_ONLY"
+    return {
+        "securities": (master, ["security_id"]),
+        "securities_details": (details, ["security_id", "source", "snapshot_kind", "snapshot_id"]),
+        "daily_stock_price": (prices, ["security_id", "source", "snapshot_kind", "snapshot_id"]),
+        "index_list": (indices, ["index_id"]),
+        "index_components": (members, ["index_id", "security_id", "source", "snapshot_id"]),
+        "security_symbol_history": (history, ["security_id", "symbol", "exchange", "source", "identity_status"]),
+    }
