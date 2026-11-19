@@ -121,28 +121,28 @@ To mirror each resulting Parquet file into the configured GCS bucket, add
 
 ### Local Silver and data quality
 
-After the Bronze fetch finishes, the market pipeline rebuilds local Silver
-snapshots under `data/silver/market/<table>/data.parquet`. Silver reads all
-matching Bronze partitions, normalizes common column names and identifiers,
-then checks required fields and table keys. OHLC tables also require parseable
-timestamps, numeric positive OHLC prices, `high >= low`, open/close inside the
-bar range, and non-negative volume (and trade count when present). Duplicate
-business keys are reduced to one row per source; rows failing checks and
-removed duplicates are written under `data/quarantine/market/` with a reason.
-
-Each run appends row counts and status to `data/reports/silver_quality.csv`.
-Tables with valid rows are rewritten as a current snapshot; if every row fails,
-the previous snapshot is left in place. You can rebuild Silver from existing
-local Bronze data without downloading again:
+Build Silver from existing Bronze Market and VSDC data with PySpark 4.0.1
+and Java 17 or later. Set `JAVA_HOME` if Java is outside your `PATH`.
 
 ```bash
-python -m transform.silver.market
-python -m transform.silver.market --tables daily_ohlc,intraday_ohlc
+source .venv/bin/activate
+python -m pip install pyspark==4.0.1 great-expectations==1.25.0
+python -m transform.silver.pipeline
 ```
 
-Pass `--skip-silver` to the ingestion pipeline when you want it to write Bronze
-only. Silver currently writes to local disk; cloud storage integration can be
-added later.
+Spark validates, deduplicates and partitions the four OHLCV tables, then
+aggregates coverage and observed trading dates. The small reference tables
+and VSDC notice extraction use the existing pandas and PyArrow transforms.
+Price datasets are partitioned by timeframe and period (year for daily bars,
+month for intraday). The full 13-table snapshot is published under
+`data/silver/current/` after the Great Expectations checks and coverage totals pass.
+Use `data/silver/current/quality_report.csv` for counts and
+`data/quarantine/silver/` for rejected rows and duplicates. The snapshot also
+contains `gx_validation.json` with the results for each table. Run
+`python -m transform.silver.quality` to validate the current snapshot again.
+
+Market ingestion writes Bronze by default. Pass `--build-silver` to also run
+the Spark pipeline when the Bronze Market and VSDC inputs are ready.
 
 ### Vnstock 6 notebook table coverage
 

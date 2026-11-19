@@ -1,4 +1,4 @@
-"""Coordinate provider-specific market ingestion and local Silver processing."""
+"""Coordinate provider-specific market ingestion into Bronze."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from ingest.market.xno.ingestion import (
     run_quotes as run_xno_quotes,
     run_reference as run_xno_reference,
 )
-from transform.silver.market import run_silver
 
 
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -70,11 +69,9 @@ def main() -> None:
     )
     parser.add_argument("--sleep", type=float, default=0.5, help="Pause between Vnstock/XNO calls")
     parser.add_argument("--upload-gcs", action="store_true", help="Mirror Bronze files to GCS")
-    parser.add_argument(
-        "--skip-silver",
-        action="store_true",
-        help="Only write Bronze; do not build the local Silver snapshots",
-    )
+    silver = parser.add_mutually_exclusive_group()
+    silver.add_argument("--skip-silver", action="store_true", help="Only write Bronze (default)")
+    silver.add_argument("--build-silver", action="store_true", help="Run Spark Silver from Bronze Market and VSDC")
     args = parser.parse_args()
     if args.days < 1 or args.sleep < 0:
         parser.error("--days must be positive and --sleep cannot be negative")
@@ -153,8 +150,11 @@ def main() -> None:
             mvp_start = mvp_end = None
         run_mvp(lake, csv_path, mvp_start, mvp_end)
 
-    if not args.skip_silver:
-        run_silver(bronze_root=lake.data_root)
+    if args.build_silver:
+        from transform.silver.pipeline import run
+
+        run(PROJECT_ROOT / "data/bronze", PROJECT_ROOT / "data/silver", PROJECT_ROOT / "data/quarantine/silver",
+            market_root=lake.data_root)
 
     print(f"Coverage report: {lake.report_path}")
 

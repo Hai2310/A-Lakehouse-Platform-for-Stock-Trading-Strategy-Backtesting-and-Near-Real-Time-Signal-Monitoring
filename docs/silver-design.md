@@ -73,7 +73,7 @@ data/bronze/{market,vsdc,bctc}
 
 - **Chặn phân vùng** khi lô đầu ra thiếu cột bắt buộc, còn khóa trùng, còn OHLCV không hợp lệ sau bước lọc, hoặc ghi Parquet thất bại. Dòng không hợp lệ đi vào `data/quarantine/silver/<domain>/<table>/` kèm mã lỗi và đường dẫn Bronze. Kiểm tra tỷ lệ dòng bị loại theo ngưỡng được chốt cho từng nguồn và khung sau khi chạy mẫu. Giữ đầu ra đã publish trước đó nếu lần mới thất bại.
 - **Báo cảnh báo và giới hạn phạm vi sử dụng** khi thiếu lịch phiên xác thực, lịch sử nguồn ngắn, thành phần rổ chỉ có snapshot hoặc dữ liệu chưa rõ ngày công bố. Độ phủ cần phân biệt trạng thái xác minh được như chưa niêm yết, tạm ngừng, không có giao dịch, lỗi nguồn và chưa xác định. Tránh suy ra thiếu dữ liệu chỉ từ việc một phút không có nến.
-- **Great Expectations** kiểm tra schema, khóa và quy tắc bắt buộc trên đầu ra Silver tạm. **Soda** theo dõi số dòng, độ mới và độ phủ theo phân vùng. Hai công cụ được đặt ở bước kiểm tra trước khi publish. Bản local đầu tiên có thể dùng các kiểm tra pandas hiện có và ghi báo cáo vào `data/reports/silver_quality.csv`.
+- **Great Expectations** kiểm tra cột bắt buộc, số dòng, khóa và quy tắc nghiệp vụ trên Parquet tạm của 13 bảng bằng Spark. Lỗi validation dừng publish và lưu kết quả vào thư mục quarantine của lượt chạy. **Soda** được dành cho bước theo dõi độ mới và độ phủ theo phân vùng.
 - Dữ liệu xuất dưới `data/silver/{market,vsdc,bctc,reference,quality}/<table>/`. Nến trong phiên ưu tiên phân vùng theo `interval` và tháng phiên, nến ngày theo năm, BCTC theo năm tài chính và VSDC theo năm chốt quyền. Đọc lại file tạm trước khi publish. Chạy lại cùng đầu vào phải cho cùng khóa và nội dung nghiệp vụ.
 
 ## Thứ tự triển khai và nghiệm thu
@@ -85,13 +85,16 @@ data/bronze/{market,vsdc,bctc}
 | 3 | Thêm `transform/silver/bctc.py` sau khi có mẫu thật từ FHSC. | Một mã có ba báo cáo, quý và năm. Join theo thời gian chọn đúng phiên bản có thể sử dụng tại ngày quyết định. |
 | 4 | Chạy kiểm tra tổng thể, sau đó nối Silver sang Gold. | Chạy lại không tăng số khóa, các phân vùng lỗi có báo cáo, truy vấn trước ngày công bố cho kết quả đúng và không có dữ liệu intraday bị điền giả. |
 
-## Chạy Silver Market và VSDC hiện tại
+## Chạy Silver Market và VSDC bằng Spark
+
+Cần Java 17 trở lên và PySpark 4.0.1. Đặt `JAVA_HOME` nếu Java nằm ngoài `PATH`.
 
 ```bash
 source .venv/bin/activate
+python -m pip install pyspark==4.0.1 great-expectations==1.25.0
 python -m transform.silver.pipeline
 ```
 
-Lệnh tạo 13 bảng từ Bronze Market và VSDC. Mỗi lượt publish một snapshot trong `data/silver/_runs/` và cập nhật con trỏ `data/silver/current/` sau khi đã ghi đủ các bảng. Đọc từng thư mục bảng trong snapshot bằng Parquet dataset. Báo cáo tại `data/silver/current/quality_report.csv`, các dòng lỗi được ghi tại `data/quarantine/silver/`.
+Lệnh tạo 13 bảng từ Bronze Market và VSDC. Mỗi lượt publish một snapshot trong `data/silver/_runs/` và cập nhật con trỏ `data/silver/current/` sau khi đã ghi đủ các bảng. Spark xử lý nến, độ phủ và lịch quan sát. Các bảng danh mục nhỏ và bước trích xuất nội dung VSDC dùng pandas/PyArrow. Đọc từng thư mục bảng trong snapshot như một Parquet dataset. Bảng giá chia theo `timeframe` và `period` (năm cho 1D, tháng cho 1m và 5m). Dùng `--master`, `--driver-memory` và `--shuffle-partitions` để điều chỉnh tài nguyên. Báo cáo tại `data/silver/current/quality_report.csv`, các dòng lỗi được ghi tại `data/quarantine/silver/`.
 
-Lịch và độ phủ trong bản local dựa trên nến quan sát được. Phiên chính thức, số nến kỳ vọng, điều kiện `available_at_utc` và lịch sử hiệu lực chưa xác minh được giữ trống hoặc có nhãn kiểm tra. Mốc cập nhật của VSDC được lưu riêng với ngày công bố. Great Expectations và Soda là bước kiểm tra được đề xuất sau bản local.
+Lịch và độ phủ trong bản local dựa trên nến quan sát được. Phiên chính thức, số nến kỳ vọng, điều kiện `available_at_utc` và lịch sử hiệu lực chưa xác minh được giữ trống hoặc có nhãn kiểm tra. Mốc cập nhật của VSDC được lưu riêng với ngày công bố. Báo cáo Great Expectations nằm ở `data/silver/current/gx_validation.json`. Có thể chạy lại kiểm tra bằng `python -m transform.silver.quality`.
